@@ -16,7 +16,7 @@ struct ContentView: View {
     init() {
         let initialText = "Выделите часть этого текста и нажмите на кнопку."
         let baseLayer = NSMutableAttributedString(string: initialText)
-        _layers = State(initialValue: [NSMutableAttributedString(string: initialText), baseLayer])
+        _layers = State(initialValue: [baseLayer])
     }
     
     var body: some View {
@@ -45,7 +45,6 @@ struct ContentView: View {
         let attributes: [NSAttributedString.Key: Any] = [
             .backgroundColor: UIColor.red.withAlphaComponent(0.25)]
         lastLayer.addAttributes(attributes, range: selectedRange)
-        layers[0].addAttributes(attributes, range: selectedRange) //layer содержащий все изменения
         let freshLayer = NSMutableAttributedString(string: lastLayer.string)
         layers.append(freshLayer)
     }
