@@ -9,24 +9,30 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedRange: NSRange = NSRange(location: 0, length: 0)
-    @State private var selectedText: NSMutableAttributedString
+    @State private var layers: [NSMutableAttributedString] = []
     @State private var showPopup: Bool = false
     @State private var highlightedText: String = ""
     
     init() {
         let initialText = "Выделите часть этого текста и нажмите на кнопку."
-        self._selectedText = State(initialValue: NSMutableAttributedString(string: initialText))
+        let baseLayer = NSMutableAttributedString(string: initialText)
+        _layers = State(initialValue: [NSMutableAttributedString(string: initialText), baseLayer])
     }
     
     var body: some View {
         VStack {
-            TextView(selectedText: $selectedText, selectedRange: $selectedRange, showPopup: $showPopup, highlightedText: $highlightedText)
-                .padding()
-                .alert(isPresented: $showPopup) {
-                    Alert(title: Text("Выделенный текст"), message: Text(highlightedText), dismissButton: .default(Text("OK")))
+            ZStack {
+                ForEach(layers.indices, id: \..self) { index in
+                    TextView(selectedText: $layers[index], selectedRange: $selectedRange, showPopup: $showPopup, highlightedText: $highlightedText, layers: $layers)
+                        .opacity(index == layers.count - 1 ? 1.0 : 0.5)
                 }
+            }
+            .padding()
+            .alert(isPresented: $showPopup) {
+                Alert(title: Text("Выделенный текст"), message: Text(highlightedText), dismissButton: .default(Text("OK")))
+            }
             
-            Button("Button") {
+            Button("Выделить") {
                 applyStyle()
             }
             .padding()
@@ -35,15 +41,13 @@ struct ContentView: View {
     }
     
     func applyStyle() {
-        guard selectedRange.length > 0 else { return }
-        
+        guard selectedRange.length > 0, let lastLayer = layers.last else { return }
         let attributes: [NSAttributedString.Key: Any] = [
-            .backgroundColor: UIColor.red.withAlphaComponent(0.5),
-            //.strikethroughStyle: NSUnderlineStyle.single.rawValue
-        ]
-        
-        selectedText.addAttributes(attributes, range: selectedRange)
-        selectedText = NSMutableAttributedString(attributedString: selectedText)
+            .backgroundColor: UIColor.red.withAlphaComponent(0.25)]
+        lastLayer.addAttributes(attributes, range: selectedRange)
+        layers[0].addAttributes(attributes, range: selectedRange) //layer содержащий все изменения
+        let freshLayer = NSMutableAttributedString(string: lastLayer.string)
+        layers.append(freshLayer)
     }
 }
 
@@ -52,21 +56,20 @@ struct TextView: UIViewRepresentable {
     @Binding var selectedRange: NSRange
     @Binding var showPopup: Bool
     @Binding var highlightedText: String
+    @Binding var layers: [NSMutableAttributedString]
     
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.attributedText = selectedText
         textView.isEditable = false
         textView.delegate = context.coordinator
-        textView.backgroundColor = .white
-        textView.isUserInteractionEnabled = true
-        
+        textView.backgroundColor = .clear
         let font = UIFont.systemFont(ofSize: 25)
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
         selectedText.addAttributes(attributes, range: NSRange(location: 0, length: selectedText.length))
         
-        let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
-        textView.addGestureRecognizer(tapGesture)
+        let singleTapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
+        textView.addGestureRecognizer(singleTapGesture)
         
         return textView
     }
@@ -92,33 +95,28 @@ struct TextView: UIViewRepresentable {
             }
         }
         
-        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+        @objc func handleSingleTap(_ gesture: UITapGestureRecognizer) {
             guard let textView = gesture.view as? UITextView else { return }
             let location = gesture.location(in: textView)
             if let position = textView.closestPosition(to: location),
                let range = textView.tokenizer.rangeEnclosingPosition(position, with: .character, inDirection: UITextDirection.layout(.left)) {
-                
                 let startOffset = textView.offset(from: textView.beginningOfDocument, to: range.start)
                 let endOffset = textView.offset(from: textView.beginningOfDocument, to: range.end)
                 
-                
                 let tappedRange = NSRange(location: startOffset, length: endOffset - startOffset)
-                
-                if tappedRange.length > 0, let color = textView.attributedText.attribute(.backgroundColor, at: tappedRange.location, effectiveRange: nil) as? UIColor, color == .red.withAlphaComponent(0.5) {
-                    
-                    
-                    let fullText = textView.attributedText!
-                    let lenght = fullText.length
+                if tappedRange.length > 0, let color = parent.layers[0].attribute(.backgroundColor, at: tappedRange.location, effectiveRange: nil) as? UIColor, color == .red.withAlphaComponent(0.25) {
+                    let fullText = parent.layers[0]
+                    let length = fullText.length
                     var start = startOffset
                     var end = endOffset
                     
-                    while start > 0, let color = fullText.attribute(.backgroundColor, at: start-1, effectiveRange: nil) as? UIColor, color == .red.withAlphaComponent(0.5) {
+                    while start > 0, let color = fullText.attribute(.backgroundColor, at: start - 1, effectiveRange: nil) as? UIColor, color == .red.withAlphaComponent(0.25) {
                         start -= 1
                     }
-                    while end < lenght, let color = fullText.attribute(.backgroundColor, at: end, effectiveRange: nil) as? UIColor, color == .red.withAlphaComponent(0.5) {
+                    while end < length, let color = fullText.attribute(.backgroundColor, at: end, effectiveRange: nil) as? UIColor, color == .red.withAlphaComponent(0.25) {
                         end += 1
                     }
-                    let highlightedRange = NSRange(location: start, length: end-start)
+                    let highlightedRange = NSRange(location: start, length: end - start)
                     let tappedText = (fullText.string as NSString).substring(with: highlightedRange)
                     
                     DispatchQueue.main.async {
@@ -128,6 +126,7 @@ struct TextView: UIViewRepresentable {
                 }
             }
         }
+
     }
     
     func makeCoordinator() -> Coordinator {
@@ -135,8 +134,3 @@ struct TextView: UIViewRepresentable {
     }
 }
 
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
-}
